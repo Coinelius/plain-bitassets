@@ -2,7 +2,7 @@
 
 > **This is a patched fork**, tracking
 > [LayerTwo-Labs/plain-bitassets](https://github.com/LayerTwo-Labs/plain-bitassets)
-> at `eddfe8f` (v0.16.3). It carries four fixes:
+> at `eddfe8f` (v0.16.3). It carries five fixes:
 >
 > 1. **Deposits are credited to the right address.** The enforcer hands the
 >    node a deposit address in the prefixed `s4_<address>_<checksum>` form,
@@ -23,9 +23,18 @@
 >    the AMM handles it. Now the requirement counts only the sides of the pool
 >    that actually are BitAssets.
 >
+> 5. **AMM swaps work at all.** `rpc_server::amm_swap` computed the payout as
+>    `new_reserve - old_reserve`, which is inverted — the receive-side reserve
+>    *falls* by what the pool pays out. A release build wraps rather than
+>    panicking, so a 993 unit payout was returned as `2^64 - 993` and the node
+>    built a transaction claiming that many units. Separately, a swap that
+>    *spent* the base coin was rejected outright (reported, confusingly, as an
+>    invalid Dutch auction bid), leaving a base-coin pool tradeable in one
+>    direction only.
+>
 > **Every node on a chain must run the same side of these fixes.** Fix 1
-> changes which address a deposit credits, and fix 4 is a consensus change —
-> this node accepts blocks an unpatched node rejects. A patched and an
+> changes which address a deposit credits, and fixes 4 and 5 are consensus
+> changes — this node accepts blocks an unpatched node rejects. A patched and an
 > unpatched node will diverge the moment anyone deposits or seeds a pool
 > against the base coin. Do not mix them on eCash alphanet slot 4.
 >
