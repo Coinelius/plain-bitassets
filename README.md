@@ -39,6 +39,11 @@
 > against the base coin. Do not mix them on eCash alphanet slot 4.
 >
 > [Compare against upstream](https://github.com/LayerTwo-Labs/plain-bitassets/compare/master...Coinelius:plain-bitassets:master)
+>
+> The Flutter client needs its own fixes to be usable against this node —
+> without them the wallet reads as empty and the AMM tab can neither quote
+> nor swap. Those live on the `alphanet-fixes` branch of
+> [Coinelius/drivechain-frontends](https://github.com/Coinelius/drivechain-frontends/tree/alphanet-fixes).
 
 ## Install
 
