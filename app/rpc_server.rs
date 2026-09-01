@@ -172,6 +172,10 @@ impl RpcServer for RpcServerImpl {
         self.app.wallet.get_bitcoin_balance().map_err(custom_err)
     }
 
+    async fn balance(&self) -> RpcResult<Balance> {
+        self.app.wallet.get_bitcoin_balance().map_err(custom_err)
+    }
+
     async fn connect_peer(&self, addr: SocketAddr) -> RpcResult<()> {
         self.app.node.connect_peer(addr).map_err(custom_err)
     }

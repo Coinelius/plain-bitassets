@@ -96,6 +96,17 @@ pub trait Rpc {
     #[method(name = "bitcoin_balance")]
     async fn bitcoin_balance(&self) -> RpcResult<Balance>;
 
+    /// Balance in sats. An alias for `bitcoin_balance`.
+    ///
+    /// Every other sidechain names this `balance`, and the sidechain
+    /// orchestrator calls it by that name for every chain including this one
+    /// (`sidechain/bitassets/client.go`). Without it the orchestrator answers
+    /// `-32601 Method not found`, so a GUI balance card never initialises and
+    /// spins forever.
+    #[open_api_method(output_schema(ToSchema))]
+    #[method(name = "balance")]
+    async fn balance(&self) -> RpcResult<Balance>;
+
     /// Deposit to address
     #[open_api_method(output_schema(PartialSchema = "schema::BitcoinTxid"))]
     #[method(name = "create_deposit")]
