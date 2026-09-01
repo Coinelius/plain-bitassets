@@ -127,20 +127,30 @@ impl RpcServer for RpcServerImpl {
             Ordering::Greater => (asset_receive, asset_spend),
         };
         let amm_pool_state = self.get_amm_pool_state(pair.0, pair.1).await?;
+        // The reserve of the asset being received *falls* by whatever the
+        // pool pays out, so the amount received is old - new. This was written
+        // as new - old, which in a release build wraps a u64 rather than
+        // panicking: a 993 payout came back as 2^64 - 993, and the node went
+        // on to build a transaction claiming that many units of the asset.
         let amount_receive = (if asset_spend < asset_receive {
             amm_pool_state.swap_asset0_for_asset1(amount_spend).map(
                 |new_amm_pool_state| {
-                    new_amm_pool_state.reserve1 - amm_pool_state.reserve1
+                    amm_pool_state
+                        .reserve1
+                        .checked_sub(new_amm_pool_state.reserve1)
                 },
             )
         } else {
             amm_pool_state.swap_asset1_for_asset0(amount_spend).map(
                 |new_amm_pool_state| {
-                    new_amm_pool_state.reserve0 - amm_pool_state.reserve0
+                    amm_pool_state
+                        .reserve0
+                        .checked_sub(new_amm_pool_state.reserve0)
                 },
             )
         })
-        .map_err(custom_err)?;
+        .map_err(custom_err)?
+        .ok_or_else(|| custom_err_msg("AMM swap payout underflow"))?;
         let mut tx = Transaction::default();
         let () = self
             .app

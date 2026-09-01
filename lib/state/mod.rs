@@ -423,7 +423,8 @@ impl State {
      *    * The number of unique BitAsset inputs must be at most two more than
      *      the number of unique BitAsset outputs.
      *  * If the tx is an AMM Swap, then
-     *    * There must be at least one BitAsset input
+     *    * There must be at least one BitAsset input, unless the asset being
+     *      spent is the base coin, which is not a BitAsset
      *    * The number of unique BitAsset outputs must be one less than,
      *      one greater than, or equal to, the number of unique BitAsset inputs.
      *  * If the tx is a Dutch auction create, then
@@ -505,16 +506,33 @@ impl State {
                 return Err(error::Amm::TooFewBitAssetsToMint.into());
             }
         };
-        if (tx.is_amm_swap() || tx.is_dutch_auction_bid())
+        let bitasset_output_count_in_range = || {
+            let min_unique_bitasset_outputs =
+                n_unique_bitasset_inputs.saturating_sub(1);
+            let max_unique_bitasset_outputs = n_unique_bitasset_inputs + 1;
+            (min_unique_bitasset_outputs..=max_unique_bitasset_outputs)
+                .contains(&n_unique_bitasset_outputs)
+        };
+        // An AMM swap spends one side of a pool and receives the other. Only
+        // `AssetId::BitAsset` is counted here, so a swap that spends the base
+        // coin has no BitAsset input at all and was rejected outright - the
+        // same blind spot as the mint and burn rules above, and it made the
+        // base coin tradeable in one direction only. Require a BitAsset input
+        // just when the asset being spent is one.
+        if tx.is_amm_swap() {
+            let spends_bitasset = tx.amm_swap().is_none_or(|swap| {
+                matches!(swap.asset_spend, AssetId::BitAsset(_))
+            });
+            if (spends_bitasset && n_unique_bitasset_inputs < 1)
+                || !bitasset_output_count_in_range()
+            {
+                // Reported as a Dutch auction error before, because the two
+                // shared this branch; a swap is not a bid.
+                return Err(error::Amm::InvalidSwap.into());
+            }
+        } else if tx.is_dutch_auction_bid()
             && (n_unique_bitasset_inputs < 1
-                || !{
-                    let min_unique_bitasset_outputs =
-                        n_unique_bitasset_inputs.saturating_sub(1);
-                    let max_unique_bitasset_outputs =
-                        n_unique_bitasset_inputs + 1;
-                    (min_unique_bitasset_outputs..=max_unique_bitasset_outputs)
-                        .contains(&n_unique_bitasset_outputs)
-                })
+                || !bitasset_output_count_in_range())
         {
             let err = error::dutch_auction::Bid::Invalid;
             return Err(Error::DutchAuction(err.into()));
@@ -622,7 +640,21 @@ impl State {
                     n_bitasset_outputs,
                 });
             }
-            if n_unique_bitasset_inputs == 0 && n_bitasset_outputs != 0 {
+            // A BitAsset output with no BitAsset input is normally creation
+            // out of nothing. It is legitimate when the BitAsset comes out of
+            // an AMM pool: a swap spending the base coin, or a burn of a pool
+            // with the base coin on one side, each receive a BitAsset without
+            // spending one. Value is still conserved - the pool reserves are
+            // debited by exactly the amount received, reconciled in
+            // `FilledTransaction`'s per-`AssetId` accounting and applied by
+            // `state::amm` - so this structural rule is the wrong place to
+            // catch inflation, and it is what left a base-coin pool tradeable
+            // in one direction only.
+            let receives_from_amm_pool = tx.is_amm_swap() || tx.is_amm_burn();
+            if n_unique_bitasset_inputs == 0
+                && n_bitasset_outputs != 0
+                && !receives_from_amm_pool
+            {
                 return Err(Error::UnbalancedBitAssets {
                     n_unique_bitasset_inputs,
                     n_bitasset_outputs,
