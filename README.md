@@ -1,20 +1,35 @@
 # BitAssets
 
-> **This is a patched fork**, tracking [LayerTwo-Labs/plain-bitassets](https://github.com/LayerTwo-Labs/plain-bitassets)
-> at `eddfe8f` (v0.16.3). It carries one fix, ported from
-> [thunder-rust#142](https://github.com/LayerTwo-Labs/thunder-rust/pull/142):
-> the node can now read the `s4_<address>_<checksum>` deposit address the
-> enforcer hands it. Upstream calls `Address::from_str` on that whole string,
-> base58 decoding fails, and the deposit silently credits
-> `11111111111111111111` — unspendable.
+> **This is a patched fork**, tracking
+> [LayerTwo-Labs/plain-bitassets](https://github.com/LayerTwo-Labs/plain-bitassets)
+> at `eddfe8f` (v0.16.3). It carries four fixes:
 >
-> **Every node on a chain must run the same side of this fix.** It changes
-> which address a deposit credits, so a patched and an unpatched node will
-> diverge the moment anyone deposits. Do not mix them on eCash alphanet
-> slot 4.
+> 1. **Deposits are credited to the right address.** The enforcer hands the
+>    node a deposit address in the prefixed `s4_<address>_<checksum>` form,
+>    and upstream calls `Address::from_str` on the whole string. Base58
+>    decoding fails, and the deposit silently credits `11111111111111111111`
+>    — unspendable. Ported from
+>    [thunder-rust#142](https://github.com/LayerTwo-Labs/thunder-rust/pull/142).
+> 2. **A `balance` RPC alias** for `bitcoin_balance`, which is the name
+>    BitWindow's orchestrator calls. Without it the GUI's balance card spins
+>    forever on a perfectly healthy chain.
+> 3. **The first mint for a pair creates the pool.** The state layer already
+>    creates a pool when the pair has none, but the `amm_mint` RPC and the
+>    GUI's dex mint both read the pool state first through a call that errors
+>    when it is missing, so *no pool could be created through any interface*.
+> 4. **The base coin may be a pool side.** An AMM mint had to spend two
+>    distinct BitAssets and a burn had to produce two, which made an
+>    ECX/BitAsset pool impossible to create or unwind even though the rest of
+>    the AMM handles it. Now the requirement counts only the sides of the pool
+>    that actually are BitAssets.
+>
+> **Every node on a chain must run the same side of these fixes.** Fix 1
+> changes which address a deposit credits, and fix 4 is a consensus change —
+> this node accepts blocks an unpatched node rejects. A patched and an
+> unpatched node will diverge the moment anyone deposits or seeds a pool
+> against the base coin. Do not mix them on eCash alphanet slot 4.
 >
 > [Compare against upstream](https://github.com/LayerTwo-Labs/plain-bitassets/compare/master...Coinelius:plain-bitassets:master)
-> — the diff is two files.
 
 ## Install
 
@@ -117,3 +132,14 @@ before assuming a fee problem.
 **Sidechain "header height 0" is normal.** The orchestrator reports a
 sidechain's sync from a single `getblockcount` probe and never populates a
 header count, so every sidechain shows headers as 0.
+
+**A BitAsset has no on-chain name.** The BitAssetId *is* `blake3(name)`, and
+registration reveals that hash, not the string — that is the point of the
+commit/reveal. `BitAssetData` has no name, ticker, or description field
+either; it carries only `commitment`, `socket_addr_v4`, `socket_addr_v6`,
+`encryption_pubkey` and `signing_pubkey`. So every client can only show you a
+hash. Names resolve locally, by hashing a string you already know.
+
+**There is no BitAsset balance RPC.** `bitcoin_balance` (and the `balance`
+alias) report sats only. BitAsset and LP token holdings exist purely as
+UTXOs, so a client has to sum `my_utxos` itself. Nothing displays them today.
