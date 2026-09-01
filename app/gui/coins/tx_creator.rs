@@ -9,7 +9,7 @@ use eframe::egui::{self, InnerResponse, Response, TextBuffer};
 use hex::FromHex;
 
 use plain_bitassets::{
-    state::AmmPair,
+    state::{AmmPair, AmmPoolState},
     types::{
         AssetId, BitAssetData, DutchAuctionId, EncryptionPubKey, Hash,
         Transaction, Txid, VerifyingKey,
@@ -271,10 +271,14 @@ impl TxCreator {
         })?;
         let lp_token_mint = {
             let amm_pair = AmmPair::new(asset0, asset1);
+            // The first mint for a pair is what creates the pool, so a
+            // missing pool is not an error here. Same fix as in
+            // `rpc_server::amm_mint`.
             let amm_pool_state = app
                 .node
-                .get_amm_pool_state(amm_pair)
-                .map_err(anyhow::Error::new)?;
+                .try_get_amm_pool_state(amm_pair)
+                .map_err(anyhow::Error::new)?
+                .unwrap_or_else(AmmPoolState::empty);
             let next_amm_pool_state = amm_pool_state
                 .mint(amount0, amount1)
                 .map_err(anyhow::Error::new)?;

@@ -86,7 +86,17 @@ impl RpcServer for RpcServerImpl {
         amount0: u64,
         amount1: u64,
     ) -> RpcResult<Txid> {
-        let amm_pool_state = self.get_amm_pool_state(asset0, asset1).await?;
+        // A mint into a pair that has no pool is what creates the pool -
+        // `apply_mint` falls back to an empty pool for exactly this case.
+        // Reading the pool state through `get_amm_pool_state` instead made
+        // the first mint for a pair fail with `missing AMM pool state`, so no
+        // pool could ever be created through the RPC.
+        let amm_pool_state = self
+            .app
+            .node
+            .try_get_amm_pool_state(AmmPair::new(asset0, asset1))
+            .map_err(custom_err)?
+            .unwrap_or_else(AmmPoolState::empty);
         let next_amm_pool_state =
             amm_pool_state.mint(amount0, amount1).map_err(custom_err)?;
         let lp_token_mint = next_amm_pool_state.outstanding_lp_tokens

@@ -57,6 +57,18 @@ impl PoolState {
         }
     }
 
+    /// State of a pool that does not exist yet.
+    ///
+    /// `apply_mint` creates a pool from `PoolState::new` when the pair has
+    /// none, so a client working out how many LP tokens a mint would create
+    /// has to model the same empty pool. `creation_txid` takes no part in
+    /// that computation - only `revert_mint` reads it - and the real txid is
+    /// not known until the transaction has been built, so the default stands
+    /// in for it.
+    pub fn empty() -> Self {
+        Self::new(Txid::default())
+    }
+
     /// Returns the new pool state after minting a position
     pub fn mint(&self, amount0: u64, amount1: u64) -> Result<Self, Error> {
         // Geometric mean of two [`u64`]s
