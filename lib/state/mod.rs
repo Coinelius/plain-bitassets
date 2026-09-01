@@ -10,12 +10,12 @@ use sneed::{DatabaseUnique, RoDatabaseUnique, RoTxn, RwTxn, UnitKey};
 use crate::{
     authorization::Authorization,
     types::{
-        Address, AmountOverflowError, Authorized, AuthorizedTransaction,
-        BitAssetId, BlockHash, Body, FilledOutput, FilledTransaction,
-        GetAddress as _, GetBitcoinValue as _, Header, InPoint, M6id, OutPoint,
-        OutPointKey, SpentOutput, Transaction, TxData, VERSION, Verify as _,
-        Version, WithdrawalBundle, WithdrawalBundleStatus,
-        proto::mainchain::TwoWayPegData,
+        Address, AmountOverflowError, AssetId, Authorized,
+        AuthorizedTransaction, BitAssetId, BlockHash, Body, FilledOutput,
+        FilledTransaction, GetAddress as _, GetBitcoinValue as _, Header,
+        InPoint, M6id, OutPoint, OutPointKey, SpentOutput, Transaction, TxData,
+        VERSION, Verify as _, Version, WithdrawalBundle,
+        WithdrawalBundleStatus, proto::mainchain::TwoWayPegData,
     },
     util::Watchable,
 };
@@ -407,13 +407,17 @@ impl State {
      *  * If the tx is a BitAsset update, then there must be at least one
      *    BitAsset control coin input and output.
      *  * If the tx is an AMM Burn, then
-     *    * There must be at least two unique BitAsset outputs
+     *    * There must be at least as many unique BitAsset outputs as there
+     *      are sides of the pool that are BitAssets (a pool with the base
+     *      coin on one side has one such side, not two)
      *    * The number of unique BitAsset outputs must be at most two more than
      *      the number of unique BitAsset inputs
      *    * The number of unique BitAsset inputs must be at most equal to the
      *      number of unique BitAsset outputs
      *  * If the tx is an AMM Mint, then
-     *    * There must be at least two BitAsset inputs
+     *    * There must be at least as many unique BitAsset inputs as there
+     *      are sides of the pool that are BitAssets (a pool with the base
+     *      coin on one side has one such side, not two)
      *    * The number of unique BitAsset outputs must be at most equal to the
      *      number of unique BitAsset inputs
      *    * The number of unique BitAsset inputs must be at most two more than
@@ -462,19 +466,44 @@ impl State {
         {
             return Err(error::BitAsset::NoBitAssetsToUpdate.into());
         }
-        if tx.is_amm_burn()
-            && (n_unique_bitasset_outputs < 2
-                || n_unique_bitasset_inputs > n_unique_bitasset_outputs
-                || n_unique_bitasset_outputs > n_unique_bitasset_inputs + 2)
-        {
-            return Err(error::Amm::InvalidBurn.into());
+        // Only the pool sides that are BitAssets are counted by
+        // `n_unique_bitasset_*`. The base coin is an `AssetId::Bitcoin`, not a
+        // BitAsset, so demanding two BitAssets unconditionally made a pool
+        // with the base coin on one side impossible to create or unwind, even
+        // though the rest of the AMM handles it: `AmmPair` sorts it, the
+        // wallet builds Bitcoin change for it, the value conservation checks
+        // in `FilledTransaction` are generic over `AssetId`, and the swap rule
+        // below already requires only one. Count how many sides of *this*
+        // pool are BitAssets instead.
+        let n_bitasset_pool_sides = |sides: Option<[AssetId; 2]>| -> usize {
+            sides.map_or(2, |sides| {
+                sides
+                    .into_iter()
+                    .filter(|asset| matches!(asset, AssetId::BitAsset(_)))
+                    .count()
+            })
         };
-        if tx.is_amm_mint()
-            && (n_unique_bitasset_inputs < 2
+        if tx.is_amm_burn() {
+            let n_sides = n_bitasset_pool_sides(
+                tx.amm_burn().map(|burn| [burn.asset0, burn.asset1]),
+            );
+            if n_unique_bitasset_outputs < n_sides
+                || n_unique_bitasset_inputs > n_unique_bitasset_outputs
+                || n_unique_bitasset_outputs > n_unique_bitasset_inputs + 2
+            {
+                return Err(error::Amm::InvalidBurn.into());
+            }
+        };
+        if tx.is_amm_mint() {
+            let n_sides = n_bitasset_pool_sides(
+                tx.amm_mint().map(|mint| [mint.asset0, mint.asset1]),
+            );
+            if n_unique_bitasset_inputs < n_sides
                 || n_unique_bitasset_outputs > n_unique_bitasset_inputs
-                || n_unique_bitasset_inputs > n_unique_bitasset_outputs + 2)
-        {
-            return Err(error::Amm::TooFewBitAssetsToMint.into());
+                || n_unique_bitasset_inputs > n_unique_bitasset_outputs + 2
+            {
+                return Err(error::Amm::TooFewBitAssetsToMint.into());
+            }
         };
         if (tx.is_amm_swap() || tx.is_dutch_auction_bid())
             && (n_unique_bitasset_inputs < 1
